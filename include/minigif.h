@@ -27,7 +27,7 @@ typedef struct {
     } fields;
     uint16_t delay_time; // in 1/100 of second (10ms)
     uint8_t transparent_col_index;
-} gif_gce_t;
+} __packed gif_gce_t;
 
 typedef struct {
     FILE *f;
@@ -42,7 +42,7 @@ typedef struct {
     gif_rgb_t gct[256]; // Global Color Table
     uint16_t gct_size;
     
-    gif_rgb_t lct[256]; // Local Color Table
+    gif_rgb_t *lct; // Local Color Table pointer to malloc-ed memory
     uint16_t lct_size;
     
     int first_gce_pos;

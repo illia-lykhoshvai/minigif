@@ -6,6 +6,11 @@
 #include "minigif.h"
 #include "minigif_structs.h"
 
+typedef struct __packed { 
+    uint16_t prefix; 
+    uint8_t suffix; 
+} dict_cell_t;
+
 typedef struct {
     gif_handle_t gif;
     gif_img_descr_t *img_descr;

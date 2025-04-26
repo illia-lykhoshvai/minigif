@@ -6,8 +6,6 @@
 extern size_t _read_bytes(gif_handle_t gif, uint8_t *val, uint16_t size);
 extern size_t _read_byte(gif_handle_t gif, uint8_t *val);
 
-#include "esp_log.h"
-
 // Read a single LZW code (bitstream spans blocks)
 static int read_lzw_code(lzw_context_t *ctx, int code_size)
 {
@@ -36,8 +34,7 @@ static int read_lzw_code(lzw_context_t *ctx, int code_size)
 
 int lzw_decompress(lzw_context_t *ctx)
 {
-    uint16_t prefix[GIF_MAX_DICT_SIZE];
-    uint8_t suffix[GIF_MAX_DICT_SIZE];
+    dict_cell_t dict[GIF_MAX_DICT_SIZE];
     uint8_t stack[GIF_MAX_STACK_SIZE];
     uint8_t *sp;
 
@@ -49,8 +46,8 @@ int lzw_decompress(lzw_context_t *ctx)
 
     // Initialize dictionary
     for (int i = 0; i < clear; i++) {
-        prefix[i] = 0xFFF;
-        suffix[i] = i;
+        dict[i].prefix = 0xFFF;
+        dict[i].suffix = i;
     }
 
     sp = stack;
@@ -76,15 +73,15 @@ int lzw_decompress(lzw_context_t *ctx)
 
         int in_code = code;
         if (code >= next_code) {
-            *sp++ = suffix[old_code];
+            *sp++ = dict[old_code].suffix;
             code = old_code;
         }
 
         while (code >= clear) {
-            *sp++ = suffix[code];
-            code = prefix[code];
+            *sp++ = dict[code].suffix;
+            code = dict[code].prefix;
         }
-        *sp++ = suffix[code];
+        *sp++ = dict[code].suffix;
 
         // Output pixels in reverse order from stack
         while (sp != stack) {
@@ -103,8 +100,8 @@ int lzw_decompress(lzw_context_t *ctx)
         }
 
         if (old_code != -1 && next_code < GIF_MAX_DICT_SIZE) {
-            prefix[next_code] = old_code;
-            suffix[next_code] = suffix[code];
+            dict[next_code].prefix = old_code;
+            dict[next_code].suffix = dict[code].suffix;
             next_code++;
             if (next_code >= max_code && code_size < 12) {
                 code_size++;

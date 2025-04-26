@@ -66,18 +66,16 @@ static bool _check_gif_start(gif_handle_t gif)
     gif_logical_screen_descr_t screen_descr = {0};
     _read_bytes(gif, (uint8_t *)&screen_descr, sizeof(screen_descr));
 
-    bool global_color_table = (screen_descr.fields & LSD__FIELD_GCT_MASK) != 0;
-    uint8_t color_resolution = ((screen_descr.fields & LSD__FIELD_CR_MASK) >> 4) + 1;
-    bool sort = (screen_descr.fields & LSD__FIELD_SORT_MASK) != 0;
-    uint16_t global_color_table_size = 1 << ((screen_descr.fields & LSD__FIELD_GCT_SZ_MASK) + 1);
+    LOG("GIF fields: GCT:%d; CR=%d; SRT=%d; GCT_SZ=%d", 
+        screen_descr.fields.bits.gct_flag, screen_descr.fields.bits.color_resolution, 
+        screen_descr.fields.bits.sort, screen_descr.fields.bits.gct_size);
 
-    LOG("GIF fields: GCT:%d; CR=%d; SRT=%d; GCT_SZ=%d", global_color_table, color_resolution, sort, global_color_table_size);
-
-    gif->cr = color_resolution;
-    if (global_color_table) {
-        gif->gct_size = global_color_table_size;
+    gif->cr = screen_descr.fields.bits.color_resolution;
+    if (screen_descr.fields.bits.gct_flag) {
+        uint16_t gct_size = 1 << (screen_descr.fields.bits.gct_size + 1);
+        gif->gct_size = gct_size;
         // global color table, right after the header
-        uint16_t gct_buf_size = sizeof(gif_rgb_t) * global_color_table_size;
+        uint16_t gct_buf_size = sizeof(gif_rgb_t) * gct_size;
         _read_bytes(gif, (uint8_t *)&gif->gct[0], gct_buf_size);
     }
 
@@ -115,20 +113,19 @@ bool _process_img(gif_handle_t gif)
     gif_img_descr_t img_descr = {0};
     _read_bytes(gif, (uint8_t *)&img_descr, sizeof(img_descr));
     LOG("image_header: [%d;%d] w=%d,h=%d", img_descr.x0, img_descr.y0, img_descr.w, img_descr.h);
+    LOG("image_header: LCT:%d; INTRL=%d; SRT=%d; LCT_SZ=%d", 
+        img_descr.fields.bits.lct_flag, img_descr.fields.bits.interlaced, 
+        img_descr.fields.bits.sort, img_descr.fields.bits.lct_size);
 
-    bool color_table = (img_descr.fields & IMG__FIELD_LCT_MASK) != 0;
-    uint8_t interlaced = (img_descr.fields & IMG__FIELD_INTRLC_MASK) != 0;
-    bool sort = (img_descr.fields & IMG__FIELD_SORT_MASK) != 0;
-    uint16_t color_table_size = 1 << ((img_descr.fields & IMG__FIELD_LCT_SZ_MASK) + 1);
+    assert(img_descr.fields.bits.interlaced == false); // currently not supported
 
-    LOG("image_header: LCT:%d; INTRL=%d; SRT=%d; LCT_SZ=%d", color_table, interlaced, sort, color_table_size);
-
-    assert(interlaced == false);
-
-    if (color_table) {
+    if (img_descr.fields.bits.lct_flag) {
+        uint16_t color_table_size = 1 << (img_descr.fields.bits.lct_size + 1);
         gif->lct_size = color_table_size;
         // local color table, right after the image descriptior
         uint16_t lct_buf_size = sizeof(gif_rgb_t) * color_table_size;
+        gif->lct = malloc(lct_buf_size);
+        assert(gif->lct != NULL);
         _read_bytes(gif, (uint8_t *)&gif->lct[0], lct_buf_size);
     } else {
         gif->lct_size = 0;
@@ -157,21 +154,22 @@ bool _process_img(gif_handle_t gif)
         _read_byte(gif, &last_byte);    
     } while (last_byte != BLOCK_TERMINATOR);
 
+    if (img_descr.fields.bits.lct_flag) {
+        free(gif->lct);
+    }
     return res == 0;
 }
 
-void _process_gce(gif_handle_t gif, gif_gce_block_t *gce_buf)
+void _process_gce(gif_handle_t gif, gif_gce_t *gce)
 {
-    gif->active_gce.fields.u8 = gce_buf->fields;
-    gif->active_gce.delay_time = gce_buf->delay_time;
-    gif->active_gce.transparent_col_index = gce_buf->transparent_col_index;
-    
+    gif->active_gce = *gce;
+
     LOG("GCE: fields=[disp:%d;usr:%d;transp:%d]; delay=%d; transp_col_index=%d",
         gif->active_gce.fields.bits.disposal, gif->active_gce.fields.bits.user_input_flag, gif->active_gce.fields.bits.transparent_flag,
         gif->active_gce.delay_time, gif->active_gce.transparent_col_index);
     
     if (gif->first_gce_pos == 0) {
-        gif->first_gce_pos = ftell(gif->f) - sizeof(gif_gce_block_t) - 3; // 3: sizeof(ext_type) + sizeof(block_sz) + 1
+        gif->first_gce_pos = ftell(gif->f) - sizeof(gif_gce_t) - 3; // 3: sizeof(ext_type) + sizeof(block_sz) + 1
     }
 }
 
@@ -188,9 +186,8 @@ bool _process_ext(gif_handle_t gif)
     LOG("Extension type 0x%.02x; block_sz=%d", ext_type, block_sz);
     switch(ext_type) {
         case GRAPHIC_CONTROL:
-            assert(block_sz == sizeof(gif_gce_block_t));
-            gif_gce_block_t *gce = (gif_gce_block_t *)&block_buf[0];
-            _process_gce(gif, gce);
+            assert(block_sz == sizeof(gif_gce_t));
+            _process_gce(gif, (gif_gce_t *)&block_buf[0]);
             // skip block end
             _skip_bytes(gif, 1);
             break;
