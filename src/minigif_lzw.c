@@ -1,45 +1,41 @@
-#include "minigif_lzw.h"
+#include "minigif.h"
 
-#define GIF_MAX_STACK_SIZE 4096
-#define GIF_MAX_DICT_SIZE 4096
-
-extern size_t _read_bytes(gif_handle_t gif, uint8_t *val, uint16_t size);
-extern size_t _read_byte(gif_handle_t gif, uint8_t *val);
+#define MINIGIF_LZW_STACK_SIZE 4096
 
 // Read a single LZW code (bitstream spans blocks)
-static int read_lzw_code(lzw_context_t *ctx, int code_size)
+static int read_lzw_code(gif_handle_t gif, int code_size)
 {
-    while (ctx->bit_count < code_size) {
+    while (gif->lzw_ctx.bit_count < code_size) {
         // If we consumed the block, read a new one
-        if (ctx->block_pos >= ctx->block_size) {
-            if (_read_byte(ctx->gif, (uint8_t *)&ctx->block_size) != 1 || ctx->block_size == 0) {
+        if (gif->lzw_ctx.block_pos >= gif->lzw_ctx.block_size) {
+            if (gif->cb.read(gif->f, (uint8_t *)&gif->lzw_ctx.block_size, sizeof(uint8_t)) != sizeof(uint8_t) || gif->lzw_ctx.block_size == 0) {
                 return -1; // No more data
             }
-            if (_read_bytes(ctx->gif, ctx->block_buffer, ctx->block_size) != ctx->block_size) {
+            if (gif->cb.read(gif->f, gif->lzw_ctx.block_buffer, gif->lzw_ctx.block_size) != gif->lzw_ctx.block_size) {
                 return -1; // No more data
             }
-            ctx->block_pos = 0;
+            gif->lzw_ctx.block_pos = 0;
         }
 
-        uint8_t byte = ctx->block_buffer[ctx->block_pos++];
-        ctx->bit_val |= (byte << ctx->bit_count);
-        ctx->bit_count += 8;
+        uint8_t byte = gif->lzw_ctx.block_buffer[gif->lzw_ctx.block_pos++];
+        gif->lzw_ctx.bit_val |= (byte << gif->lzw_ctx.bit_count);
+        gif->lzw_ctx.bit_count += 8;
     }
     
-    int code = ctx->bit_val & ((1 << code_size) - 1);
-    ctx->bit_val >>= code_size;
-    ctx->bit_count -= code_size;
+    int code = gif->lzw_ctx.bit_val & ((1 << code_size) - 1);
+    gif->lzw_ctx.bit_val >>= code_size;
+    gif->lzw_ctx.bit_count -= code_size;
     return code;
 }
 
-int lzw_decompress(lzw_context_t *ctx)
+int lzw_decompress(gif_handle_t gif)
 {
-    dict_cell_t dict[GIF_MAX_DICT_SIZE];
-    uint8_t stack[GIF_MAX_STACK_SIZE];
+    dict_cell_t *dict = &gif->lzw_ctx.dict[0];
+    uint8_t stack[MINIGIF_LZW_STACK_SIZE];
     uint8_t *sp;
 
-    int code_size = ctx->lzw_min_code_sz + 1;
-    int clear = (1 << ctx->lzw_min_code_sz);
+    int code_size = gif->lzw_ctx.lzw_min_code_sz + 1;
+    int clear = (1 << gif->lzw_ctx.lzw_min_code_sz);
     int end = clear + 1;
     int next_code = end + 1;
     int max_code = (1 << code_size);
@@ -53,16 +49,16 @@ int lzw_decompress(lzw_context_t *ctx)
     sp = stack;
     int old_code = -1;
     int code;
-    uint16_t x = ctx->img_descr->x0, y = ctx->img_descr->y0;
+    uint16_t x = gif->lzw_ctx.img_descr->x0, y = gif->lzw_ctx.img_descr->y0;
 
-    ctx->bit_val = 0;
-    ctx->bit_count = 0;
-    ctx->block_size = 0;
-    ctx->block_pos = 0;
+    gif->lzw_ctx.bit_val = 0;
+    gif->lzw_ctx.bit_count = 0;
+    gif->lzw_ctx.block_size = 0;
+    gif->lzw_ctx.block_pos = 0;
 
-    while ((code = read_lzw_code(ctx, code_size)) >= 0) {
+    while ((code = read_lzw_code(gif, code_size)) >= 0) {
         if (code == clear) {
-            code_size = ctx->lzw_min_code_sz + 1;
+            code_size = gif->lzw_ctx.lzw_min_code_sz + 1;
             max_code = (1 << code_size);
             next_code = end + 1;
             old_code = -1;
@@ -86,20 +82,21 @@ int lzw_decompress(lzw_context_t *ctx)
         // Output pixels in reverse order from stack
         while (sp != stack) {
             uint8_t color_idx = *(--sp);
-            if (ctx->gif->active_gce.fields.bits.transparent_flag && (color_idx == ctx->gif->active_gce.transparent_col_index)) {
+            if (gif->active_gce.fields.bits.transparent_flag && (color_idx == gif->active_gce.transparent_col_index)) {
                 // do not draw anything as transparency is needed
             } else {
-                gif_rgb_t color = ctx->gif->lct_size ? ctx->gif->lct[color_idx] : ctx->gif->gct[color_idx];
-                ctx->gif->painter(x, y, color, ctx->gif->user_data);
+                gif_rgb_t color = gif->lct_size ? gif->lct[color_idx] : gif->gct[color_idx];
+                gif->cb.painter(x, y, color, gif->cb.user_data);
             }
-            if (++x >= ctx->img_descr->w) {
+            if (++x >= gif->lzw_ctx.img_descr->w) {
                 x = 0;
-                if (++y >= ctx->img_descr->h)
-                return 0;
+                if (++y >= gif->lzw_ctx.img_descr->h) {
+                    return 0;
+                }
             }
         }
 
-        if (old_code != -1 && next_code < GIF_MAX_DICT_SIZE) {
+        if (old_code != -1 && next_code < MINIGIF_LZW_DICT_SIZE) {
             dict[next_code].prefix = old_code;
             dict[next_code].suffix = dict[code].suffix;
             next_code++;
