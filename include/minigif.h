@@ -47,8 +47,7 @@ typedef enum {
     GIF_STATUS_GIF_END,
 } gif_status_t;
 
-gif_handle_t minigif_init(void *f, gif_cb_t callbacks);
-void minigif_deinit(gif_handle_t gif);
+gif_handle_t minigif_init(uint8_t buffer[sizeof(gif_t)], void *f, gif_cb_t callbacks);
 
 gif_status_t minigif_render_frame(gif_handle_t gif);
 uint32_t minigif_get_frame_delay(gif_handle_t gif);

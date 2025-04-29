@@ -3,10 +3,13 @@
 #define MAX(a,b) (a > b ? a : b)
 
 // debug start
-#include "esp_log.h"
-#define TAG __FILENAME__
-#define LOG(str, ...) ESP_LOGD(TAG, str, ##__VA_ARGS__)
-#define LOG_ERR(str, ...) ESP_LOGE(TAG, str, ##__VA_ARGS__)
+#ifndef LOG_DEBUG
+#define LOG_DEBUG(fmt, ...) ((void)0)
+#endif
+
+#ifndef LOG_ERROR
+#define LOG_ERROR(fmt, ...) ((void)0)
+#endif
 // debug end
 
 extern int lzw_decompress(gif_handle_t gif);
@@ -19,14 +22,14 @@ static bool _check_gif_start(gif_handle_t gif)
     gif->cb.read(gif->f, (uint8_t *)&header, sizeof(header));
     
     if (0 != memcmp(correct_version, header, sizeof(header))) {
-        LOG_ERR("Wrong GIF header: %s, seek for %s", header, correct_version);
+        LOG_ERROR("Wrong GIF header: %s, seek for %s", header, correct_version);
         return false;
     }
     
     gif_logical_screen_descr_t screen_descr = {0};
     gif->cb.read(gif->f, (uint8_t *)&screen_descr, sizeof(screen_descr));
 
-    LOG("GIF fields: GCT:%d; CR=%d; SRT=%d; GCT_SZ=%d", 
+    LOG_DEBUG("GIF fields: GCT:%d; CR=%d; SRT=%d; GCT_SZ=%d", 
         screen_descr.fields.bits.gct_flag, screen_descr.fields.bits.color_resolution, 
         screen_descr.fields.bits.sort, screen_descr.fields.bits.gct_size);
 
@@ -41,23 +44,19 @@ static bool _check_gif_start(gif_handle_t gif)
     return true;
 }
 
-gif_handle_t minigif_init(void *f, gif_cb_t callbacks)
+gif_handle_t minigif_init(uint8_t buffer[sizeof(gif_t)], void *f, gif_cb_t callbacks)
 {
-    assert(f != NULL);
-
-    gif_handle_t gif = malloc(sizeof(gif_t));
-    if (gif == NULL) {
-        LOG_ERR("malloc(sizeof(gif_t)) failed");
+    if (buffer == NULL || f == NULL) {
         return NULL;
     }
 
+    gif_handle_t gif = (gif_handle_t)buffer;
     memset(gif, 0, sizeof(gif_t));
 
     gif->cb = callbacks;
     gif->f = f;
 
     if (!_check_gif_start(gif)) {
-        free(gif);
         gif = NULL;
     }
 
@@ -68,12 +67,15 @@ static bool _process_img(gif_handle_t gif)
 {
     gif_img_descr_t img_descr = {0};
     gif->cb.read(gif->f, (uint8_t *)&img_descr, sizeof(img_descr));
-    LOG("image_header: [%d;%d] w=%d,h=%d", img_descr.x0, img_descr.y0, img_descr.w, img_descr.h);
-    LOG("image_header: LCT:%d; INTRL=%d; SRT=%d; LCT_SZ=%d", 
+    LOG_DEBUG("image_header: [%d;%d] w=%d,h=%d", img_descr.x0, img_descr.y0, img_descr.w, img_descr.h);
+    LOG_DEBUG("image_header: LCT:%d; INTRL=%d; SRT=%d; LCT_SZ=%d", 
         img_descr.fields.bits.lct_flag, img_descr.fields.bits.interlaced, 
         img_descr.fields.bits.sort, img_descr.fields.bits.lct_size);
 
-    assert(img_descr.fields.bits.interlaced == false); // currently not supported
+    if (img_descr.fields.bits.interlaced) {
+        LOG_DEBUG("image_header: interlacing not supported in this version");
+        return false;
+    }
 
     if (img_descr.fields.bits.lct_flag) {
         uint16_t color_table_size = 1 << (img_descr.fields.bits.lct_size + 1);
@@ -109,7 +111,7 @@ static void _process_gce(gif_handle_t gif, gif_gce_t *gce)
 {
     memcpy(&gif->active_gce, gce, sizeof(gif_gce_t));
 
-    LOG("GCE: fields=[disp:%d;usr:%d;transp:%d]; delay=%d; transp_col_index=%d",
+    LOG_DEBUG("GCE: fields=[disp:%d;usr:%d;transp:%d]; delay=%d; transp_col_index=%d",
         gif->active_gce.fields.bits.disposal, gif->active_gce.fields.bits.user_input_flag, gif->active_gce.fields.bits.transparent_flag,
         gif->active_gce.delay_time, gif->active_gce.transparent_col_index);
 
@@ -137,27 +139,36 @@ static bool _process_ext(gif_handle_t gif)
     gif->cb.read(gif->f, &block_sz, sizeof(block_sz));
     gif->cb.read(gif->f, &block_buf[0], block_sz);
 
-    LOG("Extension type 0x%.02x; block_sz=%d", ext_type, block_sz);
+    LOG_DEBUG("Extension type 0x%.02x; block_sz=%d", ext_type, block_sz);
     switch(ext_type) {
         case GRAPHIC_CONTROL:
-            assert(block_sz == sizeof(gif_gce_t));
+            if (block_sz != sizeof(gif_gce_t)) {
+                return false;
+            }
+
             _process_gce(gif, (gif_gce_t *)&block_buf[0]);
             gif->cb.lseek(gif->f, 1, SEEK_CUR); // skip block end
             break;
         case COMMENT:
-            LOG("comment: %s", block_buf);
+            LOG_DEBUG("comment: %s", block_buf);
             gif->cb.lseek(gif->f, 1, SEEK_CUR); // skip block end
             break;
         case APPLICATION:
-            assert(block_sz == sizeof(gif_application_block_t));
+            if (block_sz != sizeof(gif_application_block_t)) {
+                return false;
+            }
+            
             skip_subblocks(gif);
             break;
         case PLAIN_TEXT:
-            assert(block_sz == sizeof(gif_plain_text_block_t));
+            if (block_sz != sizeof(gif_plain_text_block_t)) {
+                return false;
+            }
+
             skip_subblocks(gif);
             break;
         default:
-            LOG_ERR("Unrecognized extension type...");
+            LOG_ERROR("Unrecognized extension type...");
             break;
     }
     return true;
@@ -180,7 +191,7 @@ gif_status_t minigif_render_frame(gif_handle_t gif)
                 }
                 break;
             default:
-                LOG_ERR("Unrecognized block type %.02x @ 0x%.08lx", block_type, gif->cb.lseek(gif->f, 0, SEEK_CUR) - sizeof(block_type));
+                LOG_ERROR("Unrecognized block type %.02x @ 0x%.08lx", block_type, gif->cb.lseek(gif->f, 0, SEEK_CUR) - sizeof(block_type));
                 return GIF_STATUS_ERROR;
         }
     } while (block_type != TRAILER);
@@ -196,9 +207,4 @@ uint32_t minigif_get_frame_delay(gif_handle_t gif)
 void minigif_rewind(gif_handle_t gif)
 {
     gif->cb.lseek(gif->f, gif->first_gce_pos, SEEK_SET);
-}
-
-void minigif_deinit(gif_handle_t gif)
-{
-    free(gif);
 }
