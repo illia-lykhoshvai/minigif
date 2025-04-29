@@ -33,6 +33,9 @@ static bool _check_gif_start(gif_handle_t gif)
         screen_descr.fields.bits.gct_flag, screen_descr.fields.bits.color_resolution, 
         screen_descr.fields.bits.sort, screen_descr.fields.bits.gct_size);
 
+    gif->width = screen_descr.width;
+    gif->height = screen_descr.height;
+
     if (screen_descr.fields.bits.gct_flag) {
         uint16_t gct_size = 1 << (screen_descr.fields.bits.gct_size + 1);
         gif->gct_size = gct_size;

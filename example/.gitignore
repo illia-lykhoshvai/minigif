@@ -1,0 +1,5 @@
+build
+out
+
+.vscode/*
+!.vscode/tasks.json

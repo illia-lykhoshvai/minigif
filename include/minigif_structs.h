@@ -35,7 +35,7 @@ typedef struct {
     } fields;
     uint8_t bg_color_index;
     uint8_t pixel_aspect_ratio;
-} __packed gif_logical_screen_descr_t;
+} __attribute__((__packed__)) gif_logical_screen_descr_t;
 
 typedef struct {
     union {
@@ -49,7 +49,7 @@ typedef struct {
     } fields;
     uint16_t delay_time; // in 1/100 of second (10ms)
     uint8_t transparent_col_index;
-} __packed gif_gce_t;
+} __attribute__((__packed__)) gif_gce_t;
 
 typedef struct {
     uint16_t x0;
@@ -66,12 +66,12 @@ typedef struct {
             uint8_t lct_flag : 1;
         } bits;
     } fields;
-} __packed gif_img_descr_t;
+} __attribute__((__packed__)) gif_img_descr_t;
 
 typedef struct {
     uint8_t id[8];
     uint8_t auth_code[3];
-} __packed gif_application_block_t;
+} __attribute__((__packed__)) gif_application_block_t;
 
 typedef struct {
     uint16_t grid_left_pos;
@@ -82,12 +82,12 @@ typedef struct {
     uint8_t char_height;
     uint8_t foreground_color_index;
     uint8_t background_color_index;
-} __packed gif_plain_text_block_t;
+} __attribute__((__packed__)) gif_plain_text_block_t;
 
 typedef struct { 
     uint16_t prefix; 
     uint8_t suffix; 
-} __packed dict_cell_t;
+} __attribute__((__packed__)) dict_cell_t;
 
 #define MINIGIF_LZW_DICT_SIZE 4096
 
