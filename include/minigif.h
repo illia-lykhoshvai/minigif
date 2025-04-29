@@ -9,7 +9,7 @@
 
 #include "minigif_structs.h"
 
-typedef long (*read_cb_t)(void *f, uint8_t *val, uint16_t size);
+typedef long (*read_cb_t)(void *f, uint8_t *val, size_t size);
 typedef long (*lseek_cb_t)(void *f, long off, int seek);
 typedef void (*painter_cb_t)(uint16_t x, uint16_t y, gif_rgb_t color, void *user_data);
 

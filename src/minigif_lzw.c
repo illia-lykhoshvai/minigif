@@ -49,7 +49,8 @@ int lzw_decompress(gif_handle_t gif)
     sp = stack;
     int old_code = -1;
     int code;
-    uint16_t x = gif->lzw_ctx.img_descr->x0, y = gif->lzw_ctx.img_descr->y0;
+    uint16_t x = gif->lzw_ctx.img_descr->x0;
+    uint16_t y = gif->lzw_ctx.img_descr->y0;
 
     gif->lzw_ctx.bit_val = 0;
     gif->lzw_ctx.bit_count = 0;
