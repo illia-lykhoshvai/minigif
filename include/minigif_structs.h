@@ -15,6 +15,13 @@ typedef enum {
     APPLICATION = 0xFF,
 } block_id_t;
 
+typedef enum {
+    // DISPOSAL_TYPE_NOT_SPECIFIED = 0,
+    // DISPOSAL_TYPE_DO_NOT_DISPOSE = 1,
+    DISPOSAL_TYPE_RESTORE_TO_BACKGROUND = 2,
+    // DISPOSAL_TYPE_RESTORE_TO_PREVIOUS = 3,
+} disposal_type_t;
+
 typedef struct {
     uint8_t r;
     uint8_t g;
@@ -92,8 +99,6 @@ typedef struct {
 #define MINIGIF_LZW_DICT_SIZE 4096
 
 typedef struct {
-    gif_img_descr_t *img_descr;
-
     uint16_t clear_code, end_code;
     uint8_t lzw_min_code_sz;
     dict_cell_t dict[MINIGIF_LZW_DICT_SIZE];

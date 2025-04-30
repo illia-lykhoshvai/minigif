@@ -35,6 +35,7 @@ static bool _check_gif_start(gif_handle_t gif)
 
     gif->width = screen_descr.width;
     gif->height = screen_descr.height;
+    gif->bg_index = screen_descr.bg_color_index;
 
     if (screen_descr.fields.bits.gct_flag) {
         uint16_t gct_size = 1 << (screen_descr.fields.bits.gct_size + 1);
@@ -66,6 +67,38 @@ gif_handle_t minigif_init(uint8_t buffer[sizeof(gif_t)], void *f, gif_cb_t callb
     return gif;
 }
 
+static void _handle_disposal(gif_handle_t gif)
+{
+    LOG_DEBUG("disposal method = %d", gif->active_gce.fields.bits.disposal);
+    switch (gif->active_gce.fields.bits.disposal) {
+        case DISPOSAL_TYPE_RESTORE_TO_BACKGROUND: {
+            uint16_t w = gif->img_descr.w;
+            uint16_t h = gif->img_descr.h;
+            uint16_t x0 = gif->img_descr.x0;
+            uint16_t y0 = gif->img_descr.y0;
+
+            for (uint16_t y = y0; y < y0 + h; y++) {
+                for (uint16_t x = x0; x < x0 + w; x++) {
+                    gif->cb.painter(x, y, gif->gct[gif->bg_index], gif->cb.user_data);
+                }
+            }
+            break;
+        }
+        default:
+            // leave previously rendered frame
+            break;
+    }
+}
+
+static void skip_subblocks(gif_handle_t gif)
+{
+    uint8_t sub_block_sz = 0;
+    do {
+        gif->cb.read(gif->f, &sub_block_sz, sizeof(sub_block_sz));
+        gif->cb.lseek(gif->f, sub_block_sz, SEEK_CUR);
+    } while (sub_block_sz);
+}
+
 static bool _process_img(gif_handle_t gif) 
 {
     gif_img_descr_t img_descr = {0};
@@ -74,11 +107,6 @@ static bool _process_img(gif_handle_t gif)
     LOG_DEBUG("image_header: LCT:%d; INTRL=%d; SRT=%d; LCT_SZ=%d", 
         img_descr.fields.bits.lct_flag, img_descr.fields.bits.interlaced, 
         img_descr.fields.bits.sort, img_descr.fields.bits.lct_size);
-
-    if (img_descr.fields.bits.interlaced) {
-        LOG_DEBUG("image_header: interlacing not supported in this version");
-        return false;
-    }
 
     if (img_descr.fields.bits.lct_flag) {
         uint16_t color_table_size = 1 << (img_descr.fields.bits.lct_size + 1);
@@ -90,23 +118,19 @@ static bool _process_img(gif_handle_t gif)
         gif->lct_size = 0;
     }
 
+    gif->img_descr = img_descr;
+
     uint8_t lzw_min_code_sz;
     gif->cb.read(gif->f, &lzw_min_code_sz, sizeof(lzw_min_code_sz));
-    
+
     memset(&gif->lzw_ctx, 0, sizeof(gif->lzw_ctx));
-    gif->lzw_ctx.img_descr = &img_descr;
     gif->lzw_ctx.lzw_min_code_sz = lzw_min_code_sz;
     gif->lzw_ctx.clear_code = (1 << lzw_min_code_sz);
     gif->lzw_ctx.end_code = (1 << lzw_min_code_sz) + 1;
     
+    _handle_disposal(gif);
     int res = lzw_decompress(gif);
-
-    // skip until block end
-    uint8_t last_byte;
-    do {
-        gif->cb.read(gif->f, &last_byte, sizeof(last_byte));    
-    } while (last_byte != BLOCK_TERMINATOR);
-
+    skip_subblocks(gif); // skip block end
     return res == 0;
 }
 
@@ -121,15 +145,6 @@ static void _process_gce(gif_handle_t gif, gif_gce_t *gce)
     if (gif->first_gce_pos == 0) {
         gif->first_gce_pos = gif->cb.lseek(gif->f, 0, SEEK_CUR) - sizeof(gif_gce_t) - 3; // 3: sizeof(ext_type) + sizeof(block_sz) + 1
     }
-}
-
-static void skip_subblocks(gif_handle_t gif)
-{
-    uint8_t sub_block_sz = 0;
-    do {
-        gif->cb.read(gif->f, &sub_block_sz, sizeof(sub_block_sz));
-        gif->cb.lseek(gif->f, sub_block_sz, SEEK_CUR);
-    } while (sub_block_sz);
 }
 
 static bool _process_ext(gif_handle_t gif)
@@ -148,7 +163,6 @@ static bool _process_ext(gif_handle_t gif)
             if (block_sz != sizeof(gif_gce_t)) {
                 return false;
             }
-
             _process_gce(gif, (gif_gce_t *)&block_buf[0]);
             gif->cb.lseek(gif->f, 1, SEEK_CUR); // skip block end
             break;
@@ -167,7 +181,6 @@ static bool _process_ext(gif_handle_t gif)
             if (block_sz != sizeof(gif_plain_text_block_t)) {
                 return false;
             }
-
             skip_subblocks(gif);
             break;
         default:

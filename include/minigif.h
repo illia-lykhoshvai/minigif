@@ -5,7 +5,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <assert.h>
 
 #include "minigif_structs.h"
 
@@ -26,6 +25,7 @@ typedef struct {
     gif_cb_t cb;
     
     uint16_t width, height;
+    uint8_t bg_index;
 
     gif_rgb_t gct[256]; // Global Color Table
     uint16_t gct_size;
@@ -35,6 +35,8 @@ typedef struct {
     
     uint32_t first_gce_pos;
     gif_gce_t active_gce; // active Graphic Control Extension blocks
+    
+    gif_img_descr_t img_descr; // active Image Descriptor block
 
     lzw_context_t lzw_ctx;
 } gif_t;

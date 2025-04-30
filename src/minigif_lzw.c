@@ -49,8 +49,19 @@ int lzw_decompress(gif_handle_t gif)
     sp = stack;
     int old_code = -1;
     int code;
-    uint16_t x = gif->lzw_ctx.img_descr->x0;
-    uint16_t y = gif->lzw_ctx.img_descr->y0;
+
+    // Output position and interlace tracking
+    uint16_t w = gif->img_descr.w;
+    uint16_t h = gif->img_descr.h;
+    uint16_t x = gif->img_descr.x0;
+    uint16_t y = gif->img_descr.y0;
+
+    int interlaced = gif->img_descr.fields.bits.interlaced;
+    static const uint8_t interlace_offsets[4] = { 0, 4, 2, 1 };
+    static const uint8_t interlace_steps[4]   = { 8, 8, 4, 2 };
+
+    int pass = 0;
+    uint16_t row = interlaced ? interlace_offsets[0] : y;
 
     gif->lzw_ctx.bit_val = 0;
     gif->lzw_ctx.bit_count = 0;
@@ -80,19 +91,28 @@ int lzw_decompress(gif_handle_t gif)
         }
         *sp++ = dict[code].suffix;
 
-        // Output pixels in reverse order from stack
         while (sp != stack) {
             uint8_t color_idx = *(--sp);
-            if (gif->active_gce.fields.bits.transparent_flag && (color_idx == gif->active_gce.transparent_col_index)) {
-                // do not draw anything as transparency is needed
-            } else {
+            if (!(gif->active_gce.fields.bits.transparent_flag && (color_idx == gif->active_gce.transparent_col_index))) {
                 gif_rgb_t color = gif->lct_size ? gif->lct[color_idx] : gif->gct[color_idx];
-                gif->cb.painter(x, y, color, gif->cb.user_data);
+                gif->cb.painter(x, row, color, gif->cb.user_data);
             }
-            if (++x >= gif->lzw_ctx.img_descr->w) {
+
+            if (++x >= w) {
                 x = 0;
-                if (++y >= gif->lzw_ctx.img_descr->h) {
-                    return 0;
+                if (interlaced) {
+                    row += interlace_steps[pass];
+                    while (row >= h && pass < 3) {
+                        pass++;
+                        row = interlace_offsets[pass];
+                    }
+                    if (row >= h) {
+                        return 0;
+                    }
+                } else {
+                    if (++row >= h) {
+                        return 0;
+                    }
                 }
             }
         }
